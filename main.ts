@@ -1,12 +1,14 @@
 // cbBTC minute-bar bot for make.fun btc-race-24h-20261117-0603 (bars-replay/v1).
 //
-// Strategy: long only, one open position, all-in entries, three independent
-// entry arms plus a momentum arm, exits on take-profit or trailing stop.
-//   Arm A (deep washout): close >= 1.50% below the 90-bar high.
-//   Arm B (dip):         close >= 1.20% below the 60-bar high.
-//   Arm C (momentum):    10-bar close return above +0.50%.
-//   Exit: sell all when the close rises 0.80% above the entry close, or
-//   falls 0.30% below the trailing peak since entry.
+// Strategy: long only, one open position, all-in entries, two dip-buy arms,
+// exits on take-profit or a wide trailing stop. A tight stop was tested and
+// lost money (it exits dips that keep falling, then misses the bounce); a
+// wide stop lets the bounce arrive. A momentum arm was also tested and never
+// fired on the dev window, so it is not shipped.
+//   Arm A (deep washout): close >= 1.40% below the 90-bar high.
+//   Arm B (dip):         close >= 1.10% below the 60-bar high.
+//   Exit: sell all when the close rises 1.20% above the entry close, or
+//   falls 1.50% below the trailing peak since entry.
 // All comparisons are exact bigint cross-multiplications on the bars'
 // close values, so the run is deterministic: no clock, no environment,
 // no unseeded randomness. One asset (CBBTC), at most one order per reply.
@@ -18,14 +20,12 @@
 import { BPS, runBars, type BarsState, type BuyInput, type SellInput } from './vendor/makefun-bars.ts';
 
 const SYMBOL = 'CBBTC';
-const MOM_LOOKBACK = 10; // bars for the momentum return
-const MOM_ENTRY_BPS = 50n; // momentum: 10-bar return > +0.50% (50 bps)
 const DIP60_BARS = 60; // bars for the dip reference high
-const DIP60_BPS = 120n; // dip: close > 1.20% (120 bps) below the 60-bar high
+const DIP60_BPS = 110n; // dip: close > 1.10% (110 bps) below the 60-bar high
 const DIP90_BARS = 90; // bars for the deep-dip reference high
-const DIP90_BPS = 150n; // deep dip: close > 1.50% (150 bps) below the 90-bar high
-const TAKE_PROFIT_BPS = 80n; // exit: close >= entry * (1 + 0.80%)
-const STOP_BPS = 30n; // exit: close < peak * (1 - 0.30%)
+const DIP90_BPS = 140n; // deep dip: close > 1.40% (140 bps) below the 90-bar high
+const TAKE_PROFIT_BPS = 120n; // exit: close >= entry * (1 + 1.20%)
+const STOP_BPS = 150n; // exit: close < peak * (1 - 1.50%)
 const MAX_SLIPPAGE_BPS = 200; // 2%: wide enough for 1-minute gaps, caps bad fills
 
 /** CBBTC closes, bigints, in batch order. */
@@ -67,18 +67,12 @@ await runBars({
 
     if (!holding) {
       let enter = false;
-      // Arm C: momentum entry, 10-bar return above +0.50%.
-      if (closes.length > MOM_LOOKBACK) {
-        const now = closes[closes.length - 1];
-        const then = closes[closes.length - 1 - MOM_LOOKBACK];
-        if (now * BPS > then * (BPS + MOM_ENTRY_BPS)) enter = true;
-      }
-      // Arm B: dip entry, close more than 1.20% below the 60-bar high.
+      // Arm B: dip entry, close more than 1.10% below the 60-bar high.
       if (!enter) {
         const hi = highBefore(DIP60_BARS);
         if (hi !== null && close * BPS < hi * (BPS - DIP60_BPS)) enter = true;
       }
-      // Arm A: deep-dip entry, close more than 1.50% below the 90-bar high.
+      // Arm A: deep-dip entry, close more than 1.40% below the 90-bar high.
       if (!enter) {
         const hi = highBefore(DIP90_BARS);
         if (hi !== null && close * BPS < hi * (BPS - DIP90_BPS)) enter = true;
